@@ -55,17 +55,17 @@ def get_fitbit_client() -> fitbit.Fitbit:
             expires_at=data["expires_at"],
             refresh_cb=get_refresh_cb(data),
         )
-    except:
+    except Exception:
         logging.error(f"Failed to connect to fitbit. Probably need a new token.\n{data} ")
         client = browser_auth(data)
     return client
 
 
-def adv(l: float) -> float:
+def adv(ll: float) -> float:
     """The purpose of this function is left for the
     reader to discover
     """
-    avg = sum(l) / len(l)
+    avg = sum(ll) / len(ll)
     return avg
 
 
@@ -74,15 +74,15 @@ def merge_sleeps(a: dict, b: dict) -> dict:
         "awakeCount": sum([a["awakeCount"], b["awakeCount"]]),  # 1,
         "awakeDuration": sum([a["awakeDuration"], b["awakeDuration"]]),  # 1,
         "awakeningsCount": sum([a["awakeningsCount"], b["awakeningsCount"]]),  # 55,
-        "dateOfSleep": max([a["dateOfSleep"], b["dateOfSleep"]]),  #'2022-01-01',
+        "dateOfSleep": max([a["dateOfSleep"], b["dateOfSleep"]]),  # '2022-01-01',
         "duration": sum([a["duration"], b["duration"]]),  # 23760000,
         "efficiency": adv([a["efficiency"], b["efficiency"]]),  # 80,
-        "endTime": max([a["endTime"], b["endTime"]]),  #'2022-01-01T07:00:00.000',
+        "endTime": max([a["endTime"], b["endTime"]]),  # '2022-01-01T07:00:00.000',
         "minutesAfterWakeup": sum([a["minutesAfterWakeup"], b["minutesAfterWakeup"]]),  # 1,
         "minutesAsleep": sum([a["minutesAsleep"], b["minutesAsleep"]]),  # 333,
         "minutesAwake": sum([a["minutesAwake"], b["minutesAwake"]]),  # 333,
         "restlessCount": sum([a["restlessCount"], b["restlessCount"]]),  # 33,
-        "startTime": min([a["startTime"], b["startTime"]]),  #'2022-01-01T01:00:00.000',
+        "startTime": min([a["startTime"], b["startTime"]]),  # '2022-01-01T01:00:00.000',
         "timeInBed": sum([a["timeInBed"], b["timeInBed"]]),
     }
 
@@ -110,18 +110,28 @@ def collect_activity(fitbit_client: fitbit.Fitbit, activity: str) -> Dict:
     today = datetime.datetime.now().isoformat()[:10]
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache_file = os.path.join(CACHE_DIR, activity.replace("/", "_") + today + ".json")
-    daily = None
+    daily = []
     if not os.path.exists(cache_file):
-        today = datetime.datetime.now()
-        if (today - OLDEST_DATE).days > 1000:
-            raise Exception("you're gonna need to chunk this function into 1000 day chunks. Have fun future me")
         key = activity.replace("/", "-")
-        daily = fitbit_client.time_series(activity, base_date=OLDEST_DATE, end_date=today)[key]
+        for from_date, to_date in date_generator_99_days():
+            daily += fitbit_client.time_series(activity, base_date=from_date, end_date=to_date)[key]
         open(cache_file, "w").write(json.dumps(daily))
     else:
         logging.info("Using cache!")
         daily = json.loads(open(cache_file).read())
     return daily
+
+
+def date_generator_99_days():
+    """generate date ranges in chunks of 99 days from OLDEST_DATE to today
+
+    :yield: (date1, date2)
+    """
+    from_date = OLDEST_DATE
+    to_date = datetime.datetime.today()
+    while from_date <= to_date:
+        yield from_date, from_date + datetime.timedelta(days=99)
+        from_date = from_date + datetime.timedelta(days=99)
 
 
 def nap_filter(sleeps: dict) -> dict:
@@ -183,7 +193,7 @@ def main():
     raw_data = collect_activity(fitbit_client, "activities/heart")
     first_day = datetime.datetime.fromisoformat(raw_data[0]["dateTime"])
     daterange = pd.date_range(start=first_day, periods=len(raw_data), freq="D")
-    data = [x["value"]["restingHeartRate"] for x in raw_data]
+    data = [x["value"].get("restingHeartRate", None) for x in raw_data]
     df = pd.DataFrame(data=data, index=daterange)
     write_to_influxdb(db, df, "resting_hr", dbname)
 
