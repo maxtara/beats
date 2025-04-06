@@ -217,7 +217,27 @@ def main():
     raw_data = collect_activity(fitbit_client, "activities/heart")
     first_day = datetime.datetime.fromisoformat(raw_data[0]["dateTime"])
     daterange = pd.date_range(start=first_day, periods=len(raw_data), freq="D")
-    data = [float(x["value"].get("restingHeartRate", None)) for x in raw_data]
+    data_raw = list([float(x["value"].get("restingHeartRate", -1)) for x in raw_data])
+    # bit of a short hack to fill in empty values for when no restingHeartRate is found.
+    # Basically just getting the average and filling it in.
+    # previous/later would probably be better 
+    count = 0
+    total = 0
+    data = []
+    for d in data_raw:
+        if d == -1.0:
+            continue
+        total += d
+        count +=1
+    if count == 0:
+        raise Exception("No data found?")
+    avg = total/count
+    for d in data_raw:
+        if d == -1.0:
+            data.append(avg)
+        else:
+            data.append(d)
+
     df = pd.DataFrame(data=data, index=daterange)
     write_to_influxdb(db, df, "resting_hr", dbname)
 
